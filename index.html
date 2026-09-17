@@ -527,6 +527,69 @@ const WEEK_DAY_COLORS = ['#F5A9C8','#8FD3D3','#F8D46B','#A8C0E8','#C3AEE8','#8FD
 const SCHEDULE_SLOTS = ['07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00'];
 
 
+
+/* Migrate old Vietnamese area names → new English + icons; keep custom areas */
+const AREA_MIGRATE = {
+  'Sức khỏe & Lành mạnh': 'Health & Wellness',
+  'Sức khỏe và Lành mạnh': 'Health & Wellness',
+  'Sức khỏe': 'Health & Wellness',
+  'Tài chính': 'Finance',
+  'Sự nghiệp': 'Career',
+  'Sự Nghiệp': 'Career',
+  'Phát triển bản thân': 'Brain Storm',
+  'Mối quan hệ': 'Language'
+};
+function migrateAreas(){
+  if(!state.areas || !state.areas.length){
+    state.areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
+    return true;
+  }
+  let changed = false;
+  const byName = {};
+  DEFAULT_AREAS.forEach(a => { byName[a.name] = a; });
+
+  state.areas = state.areas.map(a => {
+    const newName = AREA_MIGRATE[a.name];
+    if(newName && byName[newName]){
+      changed = true;
+      return {
+        name: newName,
+        icon: byName[newName].icon,
+        color: byName[newName].color || a.color
+      };
+    }
+    // already English default → refresh icon from DEFAULT
+    const def = byName[a.name];
+    if(def){
+      if(a.icon !== def.icon || a.color !== def.color){
+        changed = true;
+        return { name: def.name, icon: def.icon, color: def.color };
+      }
+    }
+    return a;
+  });
+
+  // Ensure all 5 defaults exist (in order), then append custom areas
+  const custom = state.areas.filter(a => !byName[a.name]);
+  const names = new Set(state.areas.map(a => a.name));
+  const ensured = DEFAULT_AREAS.map(d => {
+    const existing = state.areas.find(a => a.name === d.name);
+    return existing ? { name: d.name, icon: d.icon, color: d.color } : JSON.parse(JSON.stringify(d));
+  });
+  // if we had to add missing defaults
+  if(ensured.some((d,i) => !state.areas.find(a => a.name === d.name))) changed = true;
+  state.areas = ensured.concat(custom);
+
+  // Remap goals & habits area field
+  (state.goals || []).forEach(g => {
+    if(AREA_MIGRATE[g.area]){ g.area = AREA_MIGRATE[g.area]; changed = true; }
+  });
+  (state.habits || []).forEach(h => {
+    if(AREA_MIGRATE[h.area]){ h.area = AREA_MIGRATE[h.area]; changed = true; }
+  });
+  return changed;
+}
+
 function getAreas(){
   return (state.areas && state.areas.length) ? state.areas : DEFAULT_AREAS;
 }
@@ -592,6 +655,7 @@ async function loadState(){
     if(raw) state = JSON.parse(raw);
   }catch(e){}
   if(!state.areas || !state.areas.length) state.areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
+  const areasMigrated = migrateAreas();
   if(!state.goals || !state.goals.length) state.goals = [newGoal(), newGoal(), newGoal()];
   if(!state.priorities) state.priorities = ['','','','','',''];
   if(!state.habits || !state.habits.length){
@@ -606,6 +670,9 @@ async function loadState(){
     while(g.steps.length < 10) g.steps.push({text:'', done:false});
   });
   state.habits.forEach(h => { if(!h.checks) h.checks = {}; });
+  if(typeof areasMigrated !== 'undefined' && areasMigrated){
+    try{ localStore.set(JSON.stringify(state)); }catch(e){}
+  }
   renderAll();
   setStatus('ok', 'Sẵn sàng');
 }
@@ -1611,6 +1678,7 @@ async function pullFromSheet(){
       if(!state.priorities) state.priorities = ['','','','','',''];
       if(!state.habits) state.habits = DEFAULT_HABITS.map(h => newHabit(h.name, h.area));
       if(!state.journals) state.journals = {};
+      migrateAreas();
       if(!state.areas || !state.areas.length) state.areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
       state.goals.forEach(g => {
         if(!g.image && oldImages[g.id]) g.image = oldImages[g.id];
